@@ -2,6 +2,7 @@
 
 > **Qualisys Consulting DevOps Assessment** — Production-grade IaC, containerisation, and CI/CD for a government E-Permit microservice.
 
+[![E-Permit CI/CD Pipeline](https://github.com/yomex96/DevOps-Assessment/actions/workflows/pipeline.yml/badge.svg)](https://github.com/yomex96/DevOps-Assessment/actions/workflows/pipeline.yml)
 ---
 
 ## Repository Structure
