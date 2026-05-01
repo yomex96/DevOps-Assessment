@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+
 
 # =========================================================
 # STAGE 1: build (single source of truth)
