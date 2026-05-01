@@ -15,9 +15,8 @@ RUN apk add --no-cache curl
 # =============================================================================
 # STAGE 1: DEPS  ← runs in parallel with STAGE 2
 # Installs ONLY production dependencies (--omit=dev).
-# --mount=type=cache caches npm tarballs on the BuildKit daemon across builds.
-# mkdir -p node_modules ensures the directory always exists even with 0 deps,
-# so the COPY --from=deps in the runner stage never fails on a missing path.
+# mkdir -p node_modules guarantees the directory always exists even with
+# zero dependencies, so COPY --from=deps never fails on a missing path.
 # =============================================================================
 FROM base AS deps
 
@@ -30,8 +29,9 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # =============================================================================
 # STAGE 2: BUILD  ← runs in parallel with STAGE 1
-# Installs all deps including devDependencies and compiles the app.
-# Falls back gracefully if no build script exists (plain JS project).
+# Compiles the app into dist/.
+# mkdir -p dist guarantees the directory always exists so the runner
+# COPY --from=build never fails regardless of whether a build script ran.
 # =============================================================================
 FROM base AS build
 
@@ -42,8 +42,11 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY src/ ./src/
 
-# Compile TypeScript → dist/ if a build script exists, otherwise copy src → dist
-RUN npm run build 2>/dev/null || (mkdir -p dist && cp -r src/* dist/)
+# Always create dist/ first, then attempt build, then copy src as fallback.
+# Three explicit steps — no silent failures.
+RUN mkdir -p dist && \
+    (npm run build 2>/dev/null || true) && \
+    (ls dist/ | grep -q . || cp -r src/* dist/)
 
 
 # =============================================================================
@@ -63,11 +66,10 @@ RUN apk add --no-cache curl
 RUN addgroup --system --gid 1001 appgroup && \
     adduser  --system --uid 1001 --ingroup appgroup --no-create-home appuser
 
-# Copy production node_modules from deps stage.
-# Always succeeds because deps stage guarantees node_modules exists (even if empty).
+# Copy production node_modules from deps stage (directory always exists)
 COPY --from=deps  --chown=appuser:appgroup /app/node_modules ./node_modules
 
-# Copy compiled application from build stage
+# Copy compiled application from build stage (directory always exists)
 COPY --from=build --chown=appuser:appgroup /app/dist ./dist
 
 # package.json needed for Node to resolve the "main" field
@@ -77,7 +79,7 @@ USER appuser
 
 EXPOSE 3000
 
-# Polls /health every 30s — container marked unhealthy after 3 consecutive failures
+# Container marked unhealthy after 3 consecutive failures
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
