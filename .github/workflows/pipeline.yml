@@ -14,21 +14,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ----------------------------------------------------
-      # Checkout code
-      # ----------------------------------------------------
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # ----------------------------------------------------
-      # Build Docker image (multi-stage Dockerfile)
-      # ----------------------------------------------------
+      # BUILD IMAGE
       - name: Build Docker image
         run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
-      # ----------------------------------------------------
-      # Install Trivy (correct + reliable method)
-      # ----------------------------------------------------
+      # INSTALL TRIVY
       - name: Install Trivy
         run: |
           sudo apt-get update
@@ -38,22 +31,17 @@ jobs:
           sudo mv trivy /usr/local/bin/
           trivy --version
 
-      # ----------------------------------------------------
-      # SECURITY GATE (FAIL ON CRITICAL VULNERABILITIES)
-      # ----------------------------------------------------
-      - name: Run Trivy Security Scan (Gate)
+      # SECURITY GATE
+      - name: Security Scan (CRITICAL FAIL)
         run: |
           trivy image \
             --severity CRITICAL \
             --ignore-unfixed \
             --exit-code 1 \
-            --no-progress \
             $IMAGE_NAME:$IMAGE_TAG
 
-      # ----------------------------------------------------
-      # Generate SARIF report (for audit)
-      # ----------------------------------------------------
-      - name: Generate Trivy SARIF Report
+      # REPORT
+      - name: Generate SARIF Report
         if: always()
         run: |
           trivy image \
@@ -64,24 +52,16 @@ jobs:
             --output trivy-results.sarif \
             $IMAGE_NAME:$IMAGE_TAG
 
-      # ----------------------------------------------------
-      # Upload scan report
-      # ----------------------------------------------------
-      - name: Upload Trivy Report
+      - name: Upload Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
           path: trivy-results.sarif
 
-      # ----------------------------------------------------
-      # Simulated ECR Login (no AWS required)
-      # ----------------------------------------------------
+      # SIMULATE ECR
       - name: Simulate ECR Login
-        run: echo "ECR login simulated using GitHub Secrets"
+        run: echo "ECR login simulated"
 
-      # ----------------------------------------------------
-      # Simulated Docker Push
-      # ----------------------------------------------------
-      - name: Simulate Docker Push
+      - name: Simulate Push
         run: echo "Image pushed to ECR (simulation)"
