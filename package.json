@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "main": "dist/index.js",
   "scripts": {
-    "build": "echo 'build step'"
-  }
+    "build": "mkdir -p dist && cp src/index.js dist/index.js"
+  },
+  "description": "> **Qualisys Consulting DevOps Assessment** — Production-grade IaC, containerisation, and CI/CD for a government E-Permit microservice.",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }
