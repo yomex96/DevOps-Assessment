@@ -36,7 +36,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 🔥 CRITICAL FIX: rebuild image in this job
+      # CRITICAL FIX: rebuild image in this job
       - name: Build Docker image (required for Trivy)
         run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
