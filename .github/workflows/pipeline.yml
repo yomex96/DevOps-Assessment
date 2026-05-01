@@ -14,43 +14,57 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ----------------------------------------------------
+      # Checkout
+      # ----------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # -----------------------------------------------------------------------
-      # BUILD IMAGE
-      # -----------------------------------------------------------------------
+      # ----------------------------------------------------
+      # Build Docker Image
+      # ----------------------------------------------------
       - name: Build Docker image
         run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
-      # -----------------------------------------------------------------------
-      # INSTALL TRIVY (PINNED VERSION - IMPORTANT FIX)
-      # -----------------------------------------------------------------------
+      # ----------------------------------------------------
+      # Install Trivy (stable pinned version)
+      # ----------------------------------------------------
       - name: Install Trivy
         run: |
-          TRIVY_VERSION=0.55.0
-          wget https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz
-          tar zxvf trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz
+          wget https://github.com/aquasecurity/trivy/releases/download/v0.55.0/trivy_0.55.0_Linux-64bit.tar.gz
+          tar zxvf trivy_0.55.0_Linux-64bit.tar.gz
           sudo mv trivy /usr/local/bin/
           trivy --version
 
-      # -----------------------------------------------------------------------
-      # SECURITY SCAN (SINGLE RUN - FIXED)
-      # -----------------------------------------------------------------------
-      - name: Run Trivy security scan (CRITICAL gate + report)
+      # ----------------------------------------------------
+      # Security Gate (FAILS ONLY ON CRITICAL)
+      # ----------------------------------------------------
+      - name: Run Trivy scan (security gate)
         run: |
           trivy image \
             --severity CRITICAL \
             --ignore-unfixed \
             --exit-code 1 \
-            --format sarif \
-            --output trivy-results.sarif \
             --no-progress \
             $IMAGE_NAME:$IMAGE_TAG
 
-      # -----------------------------------------------------------------------
-      # UPLOAD REPORT
-      # -----------------------------------------------------------------------
+      # ----------------------------------------------------
+      # Generate report (always runs)
+      # ----------------------------------------------------
+      - name: Generate SARIF report
+        if: always()
+        run: |
+          trivy image \
+            --severity CRITICAL \
+            --ignore-unfixed \
+            --exit-code 0 \
+            --format sarif \
+            --output trivy-results.sarif \
+            $IMAGE_NAME:$IMAGE_TAG
+
+      # ----------------------------------------------------
+      # Upload report
+      # ----------------------------------------------------
       - name: Upload Trivy report
         if: always()
         uses: actions/upload-artifact@v4
@@ -58,11 +72,14 @@ jobs:
           name: trivy-report
           path: trivy-results.sarif
 
-      # -----------------------------------------------------------------------
-      # SIMULATED ECR PUSH
-      # -----------------------------------------------------------------------
+      # ----------------------------------------------------
+      # Simulated ECR Login
+      # ----------------------------------------------------
       - name: Simulate ECR Login
-        run: echo "Simulated ECR login using GitHub Secrets"
+        run: echo "ECR login simulated via GitHub Secrets"
 
+      # ----------------------------------------------------
+      # Simulated Push
+      # ----------------------------------------------------
       - name: Simulate Docker Push
         run: echo "Image pushed to ECR (simulation)"
