@@ -15,7 +15,7 @@ DevOps-Assessment/
 │   └── workflows/
 │       └── pipeline.yml                # Task 3 — CI/CD pipeline
 ├── Dockerfile                          # Task 1 — Hardened, multi-stage image
-├── package.json                        # Node.js app manifest (zero external dependencies)
+├── package.json                        # Node.js app manifest (no third-party dependencies)
 ├── package-lock.json                   # Lockfile required by npm ci
 ├── src/
 │   └── index.js                        # Minimal Node.js app with /health endpoint
@@ -73,7 +73,7 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 Currently, files copied into the `runner` stage are owned by `root`. Changing ownership with a separate `RUN chown` adds a layer; the cleaner approach is:
 
 ```dockerfile
-COPY --from=builder --chown=appuser:appgroup /app/dist ./dist
+COPY --from=builder --chown=appuser:appgroup /app/src ./src 
 COPY --chown=appuser:appgroup package*.json ./
 ```
 
@@ -353,6 +353,14 @@ The Terraform state file is the single source of truth for what infrastructure T
 
 ---
 
+
+
+
+---
+
+
+
+
 ### Before a Disaster — Prevention (Set Up in Advance)
 
 **Step 1 — Enable Cross-Region Replication on the State Bucket**
@@ -374,7 +382,7 @@ aws s3api put-bucket-versioning \
 aws s3api put-bucket-replication \
   --bucket epermit-terraform-state-prod \
   --replication-configuration '{
-    "Role": "arn:aws:iam::ACCOUNT_ID:role/s3-replication-role",
+    "Role": "arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:role/s3-terraform-replication-role",
     "Rules": [{
       "Status": "Enabled",
       "Destination": {
@@ -385,20 +393,6 @@ aws s3api put-bucket-replication \
   }'
 ```
 
-**Step 2 — Replicate the DynamoDB Lock Table**
-
-Enable DynamoDB Global Tables to add `eu-west-1` as a replica:
-
-```bash
-aws dynamodb create-global-table \
-  --global-table-name epermit-terraform-locks \
-  --replication-group RegionName=eu-west-1 \
-  --region us-east-1
-```
-
-This ensures the distributed lock works in the DR region immediately — no manual setup required at failover time. Without it, two operators running `terraform apply` simultaneously during a chaotic failover is the most common cause of state corruption.
-
----
 
 ### During a Disaster — Failover Execution
 
@@ -427,6 +421,7 @@ aws s3api get-object \
   terraform.tfstate.backup-$(date +%Y%m%d-%H%M%S)
 ```
 
+
 **Step 5 — Inspect the state before any apply**
 
 ```bash
@@ -448,6 +443,8 @@ backend "s3" {
   dynamodb_table = "epermit-terraform-locks"                   # Global Table replica is active
 }
 ```
+DynamoDB lock table is region-specific and must be recreated in the DR region during failover.
+
 
 Reinitialise Terraform to switch backends:
 
