@@ -1,11 +1,9 @@
 # STAGE 0: BASE
 FROM node:20-alpine AS base
 
-# =============================================================================
 WORKDIR /app
 
-# Install curl for the HEALTHCHECK in the final stage.
-# Done here so it's cached and shared — not duplicated per stage.
+# Install curl for healthcheck
 RUN apk add --no-cache curl
 
 
@@ -13,6 +11,8 @@ RUN apk add --no-cache curl
 # STAGE 1: DEPS
 # =============================================================================
 FROM base AS deps
+
+WORKDIR /app
 
 COPY package.json package-lock.json ./
 
@@ -24,6 +24,8 @@ RUN --mount=type=cache,target=/root/.npm \
 # STAGE 2: BUILD
 # =============================================================================
 FROM base AS build
+
+WORKDIR /app
 
 COPY package.json package-lock.json ./
 
@@ -47,11 +49,16 @@ WORKDIR /app
 RUN apk add --no-cache curl
 
 RUN addgroup --system --gid 1001 appgroup && \
-    adduser  --system --uid 1001 --ingroup appgroup --no-create-home appuser
+    adduser --system --uid 1001 --ingroup appgroup --no-create-home appuser
 
-COPY --from=deps  --chown=appuser:appgroup /app/node_modules ./node_modules
-COPY --from=build --chown=appuser:appgroup /app/dist ./dist
-COPY --chown=appuser:appgroup package.json ./
+# Copy production dependencies
+COPY --from=deps /app/node_modules ./node_modules
+
+# Copy build output
+COPY --from=build /app/dist ./dist
+
+# Copy package.json
+COPY package.json ./
 
 USER appuser
 
