@@ -7,24 +7,24 @@
 ## Repository Structure
 
 ```
-epermit-infrastructure/
-├── .dockerignore
-├── .gitignore
+DevOps-Assessment/
+├── .dockerignore                       # Prevents secrets/junk entering Docker build context
+├── .gitignore                          # Prevents state files, .env, tfvars from being committed
 ├── .github/
 │   └── workflows/
 │       └── pipeline.yml                # Task 3 — CI/CD pipeline
 ├── Dockerfile                          # Task 1 — Hardened, multi-stage image
-├── package.json
-├── package-lock.json
-├── README.md
+├── package.json                        # Node.js app manifest (zero external dependencies)
+├── package-lock.json                   # Lockfile required by npm ci
 ├── src/
-│   └── index.js                        # Application source
+│   └── index.js                        # Minimal Node.js app with /health endpoint
+├── README.md
 └── terraform/
-    ├── providers.tf                    # Terraform block, S3 backend, AWS provider
+    ├── providers.tf                    # terraform{} block, S3 backend, AWS provider
     ├── main.tf                         # Root orchestrator (module calls only)
     ├── variables.tf                    # All input variables (no hardcoded values)
     ├── outputs.tf                      # Root outputs
-    ├── terraform.tfvars.example
+    ├── terraform.tfvars.example        # Safe template — real .tfvars is gitignored
     └── modules/
         ├── vpc/                        # Task 2a — HA VPC across 2 AZs
         │   ├── main.tf
@@ -46,18 +46,24 @@ The original "toxic" Dockerfile was rewritten with strict production requirement
 
 | Problem in Original | Fix Applied |
 |---|---|
-| `BUILD` stage re-ran `npm ci` redundantly (deps stage existed but wasn't used) | Three clean stages: `deps` (prod deps only), `build` (transpile), `runner` (final) |
-| Ran as `root` | Dedicated system user/group `appuser:appgroup` (UID/GID 1001), created before any `COPY`; `USER appuser` before `CMD` |
+| Ran as `root` | Dedicated system user/group `appuser:appgroup` (UID/GID 1001); `USER appuser` before `CMD` |
+| Fat image — devDependencies included | 4-stage build: `base` → `deps` (prod only) + `build` (parallel) → `runner` (clean final image) |
 | Cache-busting on every code change | `COPY package.json package-lock.json ./` before `RUN npm ci` — deps layer only rebuilds when manifests change |
-| `curl` installed in the runtime image | Removed entirely. Healthcheck uses Node.js itself (`http.get`) — zero extra attack surface |
-| No `--omit=dev` on production install | `npm ci --omit=dev --ignore-scripts` in `deps` stage — devDependencies never reach the final image |
-| Files owned by root | All `COPY` instructions use `--chown=appuser:appgroup` |
+| No BuildKit mount cache | `--mount=type=cache,target=/root/.npm` — npm tarballs cached on BuildKit daemon, not re-downloaded on every build |
+| `curl` in the runtime image | Removed entirely — HEALTHCHECK uses Node.js built-in `http` module, zero extra packages |
+| Files owned by root after COPY | All `COPY` instructions use `--chown=appuser:appgroup` — no extra `RUN chown` layer |
+| `postinstall` script risk | `--ignore-scripts` on `npm ci` prevents malicious lifecycle hooks from executing |
 
-### Supply-Chain Hardening
+### Multi-Stage Parallel Build
 
-- `--ignore-scripts` on `npm ci` prevents malicious `postinstall` hooks from executing.
-- The runner stage is derived from `node:20-alpine` (minimal OS surface) with no additional packages installed.
-- The image is compatible with `docker run --read-only` for an additional Zero-Trust runtime constraint.
+BuildKit automatically executes `deps` and `build` stages in parallel since they share the same `base` but do not depend on each other:
+
+```
+base
+ ├── deps   (npm ci --omit=dev)     ┐
+ └── build  (npm ci + npm run build)├──► runner (final image)
+            parallel ───────────────┘
+```
 
 ### Healthcheck Without curl
 
@@ -66,7 +72,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD node -e "require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 ```
 
-This uses the Node.js runtime (already present in the image) to perform the health check. Installing `curl` would add an additional binary to the image — an unnecessary attack surface in a Zero-Trust environment.
+Uses the Node.js runtime already present in the image — installing `curl` would add an unnecessary binary and introduce CVEs to the runtime image.
 
 ---
 
@@ -75,7 +81,7 @@ This uses the Node.js runtime (already present in the image) to perform the heal
 ### Prerequisites
 
 - [Terraform ≥ 1.7](https://developer.hashicorp.com/terraform/install)
-- AWS CLI configured (`aws configure`) with a role that has permissions to create VPC, IAM, CloudWatch, and S3 endpoint resources
+- AWS CLI configured (`aws configure`) with permissions to create VPC, IAM, and S3 resources
 - An S3 bucket and DynamoDB table for remote state (see Step 0)
 
 ### Step 0 — Bootstrap Remote State (one-time, manual)
@@ -83,7 +89,7 @@ This uses the Node.js runtime (already present in the image) to perform the heal
 The S3 backend resources must exist before `terraform init` can run. Create them once:
 
 ```bash
-# Create the state bucket (versioning is mandatory — enables point-in-time recovery)
+# Create the state bucket — versioning is mandatory for point-in-time recovery
 aws s3api create-bucket \
   --bucket epermit-terraform-state-prod \
   --region us-east-1
@@ -99,13 +105,13 @@ aws s3api put-bucket-encryption \
     "Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]
   }'
 
-# Block all public access (Zero-Trust: state must never be public)
+# Block all public access — state must never be public
 aws s3api put-public-access-block \
   --bucket epermit-terraform-state-prod \
   --public-access-block-configuration \
   "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 
-# Create the DynamoDB lock table (prevents concurrent state corruption)
+# Create the DynamoDB lock table — prevents concurrent state corruption
 aws dynamodb create-table \
   --table-name epermit-terraform-locks \
   --attribute-definitions AttributeName=LockID,AttributeType=S \
@@ -114,7 +120,7 @@ aws dynamodb create-table \
   --region us-east-1
 ```
 
-### Step 1 — Copy and Fill tfvars
+### Step 1 — Copy and fill tfvars
 
 ```bash
 cd terraform/
@@ -136,7 +142,7 @@ Terraform connects to the S3 backend, downloads the AWS provider, and prepares t
 # Use defaults (us-east-1, prod environment)
 terraform plan
 
-# Or override variables inline (e.g. for DR failover to eu-west-1)
+# Or override variables for DR failover to eu-west-1
 terraform plan \
   -var="aws_region=eu-west-1" \
   -var="availability_zones=[\"eu-west-1a\",\"eu-west-1b\"]" \
@@ -150,7 +156,7 @@ terraform plan \
 terraform apply
 ```
 
-Type `yes` when prompted. Terraform provisions the VPC, subnets, NAT Gateways, VPC Flow Logs, S3 VPC Endpoint, IAM role, and instance profile.
+Type `yes` when prompted. Terraform provisions the VPC, subnets, NAT Gateways, IAM role, and instance profile.
 
 ### Step 5 — Verify Outputs
 
@@ -158,7 +164,7 @@ Type `yes` when prompted. Terraform provisions the VPC, subnets, NAT Gateways, V
 terraform output
 ```
 
-Key outputs: `vpc_id`, `public_subnet_ids`, `private_subnet_ids`, `ec2_instance_profile_name`, `s3_vpc_endpoint_id`.
+Key outputs: `vpc_id`, `public_subnet_ids`, `private_subnet_ids`, `ec2_instance_profile_name`, `ec2_role_arn`.
 
 ### Step 6 — Destroy (cleanup)
 
@@ -174,21 +180,21 @@ terraform destroy
 
 | Design Choice | Rationale |
 |---|---|
-| One NAT Gateway per AZ | Eliminates the NAT Gateway as a single point of failure. A single NAT GW failure would take down outbound internet for private subnets in all AZs. |
-| `map_public_ip_on_launch = false` on all subnets | EC2 instances never receive public IPs by accident. Public-facing traffic enters via the load balancer only. |
-| VPC Flow Logs → CloudWatch | Zero-Trust requires full traffic visibility. Flow logs are the network audit trail — mandatory for detecting exfiltration or lateral movement. |
-| S3 Gateway VPC Endpoint | S3 traffic (epermit document reads) never traverses the public internet via the NAT Gateway. The endpoint also carries a policy that restricts reachable buckets at the network layer — a second enforcement point independent of IAM. |
+| One NAT Gateway per AZ | Eliminates NAT as a single point of failure — if one AZ's NAT fails, the other AZ's private subnets still have outbound internet |
+| Private route tables per AZ | Each private subnet routes through its local NAT Gateway — AZ failure is contained |
+| `count` with `length(var.availability_zones)` | Adding a third AZ requires only a new CIDR in the variable — no code changes |
+| All values parameterised | Region, AZ list, CIDRs, environment — nothing hardcoded |
 
-### IAM Module (Least Privilege + Zero-Trust)
+### IAM Module (Least Privilege)
 
-The role enforces three independent layers:
+The role enforces two independent layers:
 
-1. **Trust Policy** — Only `ec2.amazonaws.com` can assume this role. A `Condition` on `aws:SourceAccount` prevents cross-account confused-deputy attacks.
-2. **Permission Policy** — Explicit `Allow` only for `s3:ListBucket` and `s3:GetObject` on `epermit-secure-documents-prod`.
-3. **Explicit Deny** — `s3:*` is denied on all resources that are NOT the allowed bucket. This `Deny` is unconditional and overrides any future accidental `Allow` (including AWS-managed policies attached by mistake).
+1. **Allow Policy** — `s3:ListBucket` and `s3:GetObject` only on `epermit-secure-documents-prod`
+2. **Explicit Deny** — `s3:*` denied on all resources that are NOT the allowed bucket
 
 ```
-IAM Evaluation: Does the request match an explicit Deny? → YES → DENIED (regardless of any Allow)
+IAM Evaluation: Does the request match an explicit Deny? → YES → DENIED
+(Explicit Deny overrides any accidental Allow — including AWS-managed policies attached by mistake)
 ```
 
 ---
@@ -201,25 +207,22 @@ Configure in **Settings → Secrets and variables → Actions**:
 
 | Secret | Description |
 |---|---|
-| `AWS_ECR_REGISTRY` | ECR registry URI, e.g. `123456789012.dkr.ecr.us-east-1.amazonaws.com` |
-| `AWS_ECR_REPOSITORY` | ECR repository name, e.g. `epermit-api` |
-| `AWS_ACCOUNT_ID` | AWS account ID (used to construct ECR login command) |
-| `AWS_ACCESS_KEY_ID` | AWS access key — replace with OIDC for production (see below) |
-| `AWS_SECRET_ACCESS_KEY` | AWS secret key — replace with OIDC for production |
-| `AWS_REGION` | Target region, e.g. `us-east-1` |
+| `AWS_ECR_REGISTRY` | ECR registry URI — used in simulate steps (masked in logs) |
+| `AWS_ECR_REPOSITORY` | ECR repository name — used in simulate steps (masked in logs) |
+| `AWS_REGION` | Target region — used in simulate steps (masked in logs) |
 
-> **Production Upgrade — OIDC Federation:** Replace the static `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` secrets with an OIDC identity provider. GitHub Actions federates directly into an IAM Role, eliminating all long-lived static credentials from your repository. This is the production Zero-Trust posture for CI/CD → AWS authentication.
+> **Production Upgrade:** Replace the simulated steps with GitHub OIDC federation into an IAM Role. This eliminates all long-lived static credentials — GitHub Actions federates directly into AWS with no secrets stored in the repository.
 
 ### Zero-Trust Hardening Applied to the Pipeline
 
 | Control | Implementation |
 |---|---|
-| Pinned action SHAs | All `uses:` references are pinned to commit SHAs, not floating tags (e.g. `@v4`). A compromised tag cannot inject arbitrary code into the pipeline. |
-| Minimal GITHUB_TOKEN permissions | `permissions:` block at workflow level grants only `contents: read`, `security-events: write`, `id-token: write`. Everything else is denied. |
-| Security gate before push | Trivy scans the built image. `exit-code: "1"` causes the job to fail and the image is **never pushed to ECR** if a CRITICAL CVE is found. |
-| `--no-cache` on build | Forces a clean build in CI — no stale cached layers that could mask vulnerabilities. |
-| Immutable image tags | Images are tagged with the commit SHA (`${{ github.sha }}`). Every deployment is traceable to an exact commit. |
-| SARIF report upload | Scan results are uploaded to the GitHub Security tab (`security-events: write`) for persistent audit visibility, even when the pipeline fails. |
+| Trivy called directly | Trivy binary installed and called via `run:` — no action wrapper that could silently override `--ignore-unfixed` or `--exit-code` flags |
+| Security gate before push | `--exit-code 1` fails the job — image is **never pushed** if a fixable CRITICAL CVE exists |
+| `--ignore-unfixed` | Only CVEs with available patches trigger failure — CVEs with no fix are excluded (not actionable) |
+| Immutable image tags | Images tagged with `${{ github.sha }}` — every build is traceable to an exact commit |
+| SARIF report artifact | Scan results uploaded as a build artifact — persistent audit trail even when the pipeline fails |
+| Simulated credentials | ECR login and push are simulated via `echo` — no real AWS credentials needed or stored |
 
 ### Pipeline Flow
 
@@ -228,38 +231,46 @@ push to main
      │
      ▼
 ┌─────────────────────────────────┐
-│  1. Checkout (pinned SHA)       │
+│  1. Checkout repository         │
 └─────────────┬───────────────────┘
               │
               ▼
 ┌─────────────────────────────────┐
 │  2. Build Docker image          │
-│     --no-cache, load=true       │
-│     push=false                  │
+│     docker build -t             │
+│     epermit-api:${{ sha }}      │
 └─────────────┬───────────────────┘
               │
               ▼
-┌─────────────────────────────────┐   ← SECURITY GATE
-│  3. Trivy Scan                  │
-│     exit-code=1 on CRITICAL     │   Image never reaches ECR
-│     *** PIPELINE FAILS HERE *** │   if this step fails
-│     if vulnerabilities found    │
+┌─────────────────────────────────┐
+│  3. Install Trivy               │
+│     (official install script)   │
+└─────────────┬───────────────────┘
+              │
+              ▼
+┌─────────────────────────────────┐  ← SECURITY GATE
+│  4. Trivy Security Scan         │
+│     --severity CRITICAL         │
+│     --ignore-unfixed            │
+│     --exit-code 1               │
+│  *** PIPELINE FAILS HERE ***    │
+│  if fixable CRITICAL CVEs found │
 └─────────────┬───────────────────┘
               │  (only continues if scan passes)
               ▼
 ┌─────────────────────────────────┐
-│  4. Upload SARIF to GitHub      │   always() — audit trail even on failure
-│     Security tab                │
+│  5. Generate SARIF report       │  if: always() — audit trail
+│     Upload as build artifact    │  even when pipeline fails
 └─────────────┬───────────────────┘
               │
               ▼
 ┌─────────────────────────────────┐
-│  5. Simulate ECR Login          │   Credentials via GitHub Secrets (masked)
+│  6. Simulate ECR Login          │  Secrets masked in logs
 └─────────────┬───────────────────┘
               │
               ▼
 ┌─────────────────────────────────┐
-│  6. Simulate ECR Push           │   :sha (immutable) + :latest tags
+│  7. Simulate Docker Push        │  Tagged with commit SHA
 └─────────────────────────────────┘
 ```
 
@@ -279,10 +290,10 @@ The Terraform state file is the single source of truth for what infrastructure T
 
 **Step 1 — Enable Cross-Region Replication on the State Bucket**
 
-Configure this once after the bootstrap step. Every write to the state file in `us-east-1` is automatically and continuously replicated to `eu-west-1`. Because versioning is already enabled, every previous state version is also replicated.
+Configure this once after the bootstrap step. Every write to the state file in `us-east-1` is automatically replicated to `eu-west-1`:
 
 ```bash
-# Create the DR replica bucket in eu-west-1
+# Create the DR replica bucket
 aws s3api create-bucket \
   --bucket epermit-terraform-state-prod-dr-euwest1 \
   --create-bucket-configuration LocationConstraint=eu-west-1 \
@@ -292,18 +303,6 @@ aws s3api put-bucket-versioning \
   --bucket epermit-terraform-state-prod-dr-euwest1 \
   --versioning-configuration Status=Enabled
 
-aws s3api put-bucket-encryption \
-  --bucket epermit-terraform-state-prod-dr-euwest1 \
-  --server-side-encryption-configuration '{
-    "Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]
-  }'
-
-aws s3api put-public-access-block \
-  --bucket epermit-terraform-state-prod-dr-euwest1 \
-  --public-access-block-configuration \
-  "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" \
-  --region eu-west-1
-
 # Configure replication from us-east-1 → eu-west-1
 aws s3api put-bucket-replication \
   --bucket epermit-terraform-state-prod \
@@ -311,22 +310,17 @@ aws s3api put-bucket-replication \
     "Role": "arn:aws:iam::ACCOUNT_ID:role/s3-replication-role",
     "Rules": [{
       "Status": "Enabled",
-      "DeleteMarkerReplication": { "Status": "Enabled" },
       "Destination": {
         "Bucket": "arn:aws:s3:::epermit-terraform-state-prod-dr-euwest1",
-        "StorageClass": "STANDARD",
-        "ReplicationTime": { "Status": "Enabled", "Time": { "Minutes": 15 } },
-        "Metrics": { "Status": "Enabled", "EventThreshold": { "Minutes": 15 } }
+        "StorageClass": "STANDARD"
       }
     }]
   }'
 ```
 
-`ReplicationTime` with an SLA of 15 minutes (S3 RTC) ensures the replica lags by no more than 15 minutes. For a state file that is at most kilobytes, replication in practice takes seconds.
-
 **Step 2 — Replicate the DynamoDB Lock Table**
 
-Enable [DynamoDB Global Tables](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GlobalTables.html) to add `eu-west-1` as a replica region:
+Enable [DynamoDB Global Tables](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GlobalTables.html) to add `eu-west-1` as a replica:
 
 ```bash
 aws dynamodb create-global-table \
@@ -335,19 +329,17 @@ aws dynamodb create-global-table \
   --region us-east-1
 ```
 
-This ensures the distributed lock mechanism works in the DR region without any manual setup at failover time. Without this, two operators could run `terraform apply` simultaneously during a chaotic failover — the most common cause of state corruption.
+This ensures the distributed lock works in the DR region immediately — no manual setup required at failover time. Without it, two operators running `terraform apply` simultaneously during a chaotic failover is the most common cause of state corruption.
 
 ---
 
 ### During a Disaster — Failover Execution
 
-**Step 3 — Confirm `us-east-1` is Unreachable**
+**Step 3 — Confirm `us-east-1` is unreachable**
 
-Before acting, verify the outage is real and not a transient API error. Check the [AWS Service Health Dashboard](https://health.aws.amazon.com/health/status). A transient error that self-resolves while a failover is mid-flight is the scenario most likely to produce state corruption.
+Verify the outage is real — not a transient API error. Check the [AWS Service Health Dashboard](https://health.aws.amazon.com/health/status). A transient error that self-resolves while a failover is mid-flight is the scenario most likely to produce state corruption.
 
-**Step 4 — Identify the Latest Replicated State Version**
-
-The S3 replication job may have been mid-flight when the region went down. Identify the most recent complete state object version in the DR bucket:
+**Step 4 — Identify the latest replicated state version**
 
 ```bash
 aws s3api list-object-versions \
@@ -368,23 +360,21 @@ aws s3api get-object \
   terraform.tfstate.backup-$(date +%Y%m%d-%H%M%S)
 ```
 
-**Step 5 — Inspect the State Before Any Apply**
+**Step 5 — Inspect the state before any apply**
 
 ```bash
-# Point to the local backup temporarily
-export TF_CLI_ARGS_plan="-state=terraform.tfstate.backup-*"
 terraform state list
 ```
 
-Verify the state reflects what was deployed in `us-east-1`. **Do not proceed if the state looks incomplete or corrupted.** A corrupted state applied to a new region can create orphaned resources that are expensive and difficult to clean up.
+Verify the state reflects what was deployed in `us-east-1`. Do not proceed if the state looks incomplete or corrupted.
 
-**Step 6 — Reconfigure the Terraform Backend to Point to `eu-west-1`**
+**Step 6 — Reconfigure the Terraform backend to `eu-west-1`**
 
-Update the `backend "s3"` block in **`terraform/providers.tf`** (note: the backend is declared in `providers.tf`, not `main.tf`):
+Update the `backend "s3"` block in `terraform/providers.tf`:
 
 ```hcl
 backend "s3" {
-  bucket         = "epermit-terraform-state-prod-dr-euwest1"  # ← DR bucket
+  bucket         = "epermit-terraform-state-prod-dr-euwest1"  # DR bucket
   key            = "global/epermit/terraform.tfstate"
   region         = "eu-west-1"                                 # ← changed
   encrypt        = true
@@ -398,9 +388,7 @@ Reinitialise Terraform to switch backends:
 terraform init -reconfigure
 ```
 
-Terraform migrates to the DR backend. The DynamoDB Global Table in `eu-west-1` immediately provides locking.
-
-**Step 7 — Plan Against the DR Region**
+**Step 7 — Plan against the DR region**
 
 ```bash
 terraform plan \
@@ -410,9 +398,9 @@ terraform plan \
   -var="private_subnet_cidrs=[\"10.0.11.0/24\",\"10.0.12.0/24\"]"
 ```
 
-Carefully review the plan output. Because the old resources were in `us-east-1` (which is down), Terraform correctly detects they are unreachable and plans to **create new resources** in `eu-west-1`. This is expected and correct — a fresh stack in the new region. The state file tracks these new resources going forward.
+Review the plan carefully. Terraform correctly detects the `us-east-1` resources are unreachable and plans to create new resources in `eu-west-1`. This is expected — a fresh stack in the new region.
 
-**Step 8 — Apply to the DR Region**
+**Step 8 — Apply to the DR region**
 
 ```bash
 terraform apply \
@@ -422,20 +410,20 @@ terraform apply \
   -var="private_subnet_cidrs=[\"10.0.11.0/24\",\"10.0.12.0/24\"]"
 ```
 
-Infrastructure is live in `eu-west-1`. The state file in the DR bucket is updated atomically. The DynamoDB lock is acquired and released correctly.
+Infrastructure is now live in `eu-west-1`. The state file in the DR bucket is updated atomically.
 
 ---
 
 ### After Recovery
 
-**Step 9 — Do NOT Touch `us-east-1` State Until the Region Is Confirmed Stable**
+**Step 9 — Do NOT touch `us-east-1` state until the region is confirmed stable**
 
-When `us-east-1` recovers, the original state bucket contains the old state — reflecting resources that no longer exist (they were recreated in `eu-west-1`). Running `terraform apply` against it would create duplicate infrastructure.
+When `us-east-1` recovers, the original state bucket still contains the old state reflecting resources that no longer exist. Running `terraform apply` against it would create duplicate infrastructure.
 
-Choose one of two paths:
+Choose one path:
 
-- **Stay in `eu-west-1` (recommended):** Update DNS, decommission `us-east-1` resources manually or with a targeted `terraform destroy -var="aws_region=us-east-1"`, and treat `eu-west-1` as the new primary. Update the backend block back to its permanent configuration pointing at the DR bucket (which is now the primary).
-- **Migrate back to `us-east-1`:** Use `terraform state mv` to reconcile state entries, destroy `eu-west-1` resources, and migrate the backend back to `us-east-1`. This is operationally more complex and riskier during a recovery window.
+- **Stay in `eu-west-1` (recommended):** Update DNS, decommission `us-east-1` resources with a targeted `terraform destroy`, and treat `eu-west-1` as the new primary.
+- **Migrate back to `us-east-1`:** Use `terraform state mv` to reconcile state entries, destroy `eu-west-1` resources, and migrate the backend back. This is operationally more complex and riskier during a recovery window.
 
 ---
 
@@ -444,11 +432,11 @@ Choose one of two paths:
 | Mechanism | Why It Matters |
 |---|---|
 | **S3 Versioning** | Every state write is a new immutable version. Rolling back to a known-good state is a single `get-object --version-id` call. No state is ever permanently lost. |
-| **S3 Cross-Region Replication (with RTC)** | State is continuously mirrored with a 15-minute SLA. DR failover uses data that is at most minutes old, not hours. |
-| **DynamoDB Global Tables** | The distributed lock prevents two operators from running `apply` simultaneously during a chaotic failover — the most common cause of state corruption. The replica is active and consistent before the disaster occurs. |
-| **Immutable image tags** (pipeline) | Docker images tagged by commit SHA mean the exact binary that ran in `us-east-1` can be pulled into `eu-west-1` from ECR without a rebuild. |
-| **`terraform plan` before `apply`** | The plan step is a mandatory sanity check. During DR, what Terraform intends to do must be reviewed by a human before resources are created. Never skip it. |
-| **Region passed as variable** | The AWS provider region is a variable, not a hardcode. The same Terraform code targets `eu-west-1` with a single `-var` flag — no file changes, no risk of merge conflicts during an outage. |
+| **S3 Cross-Region Replication** | State is continuously mirrored. DR failover uses data seconds old, not hours. |
+| **DynamoDB Global Tables** | The distributed lock prevents two operators from running `apply` simultaneously during a chaotic failover — the most common cause of state corruption. |
+| **Immutable image tags** | Docker images tagged by commit SHA mean the exact binary that ran in `us-east-1` can be pulled into `eu-west-1` without a rebuild. |
+| **`terraform plan` before `apply`** | Mandatory sanity check during DR. Never skip it — what Terraform intends to do must be reviewed by a human before resources are created. |
+| **Region passed as variable** | The AWS provider region is a variable, not hardcoded. The same Terraform code targets `eu-west-1` with a single `-var` flag — no file edits during an outage. |
 
 ---
 
