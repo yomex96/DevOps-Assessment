@@ -1,50 +1,87 @@
-# STAGE 1: deps
+name: E-Permit CI/CD Pipeline
 
-FROM node:20-alpine AS deps
+on:
+  push:
+    branches:
+      - main
 
-WORKDIR /app
+env:
+  IMAGE_NAME: epermit-api
+  IMAGE_TAG: ${{ github.sha }}
 
-COPY package.json package-lock.json ./
+jobs:
+  build-scan-push:
+    runs-on: ubuntu-latest
 
-RUN npm ci --omit=dev
+    steps:
+      # ----------------------------------------------------
+      # Checkout code
+      # ----------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
+      # ----------------------------------------------------
+      # Build Docker image (multi-stage Dockerfile)
+      # ----------------------------------------------------
+      - name: Build Docker image
+        run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
+      # ----------------------------------------------------
+      # Install Trivy (correct + reliable method)
+      # ----------------------------------------------------
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget https://github.com/aquasecurity/trivy/releases/download/v0.55.0/trivy_0.55.0_Linux-64bit.tar.gz
+          tar zxvf trivy_0.55.0_Linux-64bit.tar.gz
+          sudo mv trivy /usr/local/bin/
+          trivy --version
 
-# STAGE 2: builder
+      # ----------------------------------------------------
+      # SECURITY GATE (FAIL ON CRITICAL VULNERABILITIES)
+      # ----------------------------------------------------
+      - name: Run Trivy Security Scan (Gate)
+        run: |
+          trivy image \
+            --severity CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --no-progress \
+            $IMAGE_NAME:$IMAGE_TAG
 
-FROM node:20-alpine AS builder
+      # ----------------------------------------------------
+      # Generate SARIF report (for audit)
+      # ----------------------------------------------------
+      - name: Generate Trivy SARIF Report
+        if: always()
+        run: |
+          trivy image \
+            --severity CRITICAL \
+            --ignore-unfixed \
+            --exit-code 0 \
+            --format sarif \
+            --output trivy-results.sarif \
+            $IMAGE_NAME:$IMAGE_TAG
 
-WORKDIR /app
+      # ----------------------------------------------------
+      # Upload scan report
+      # ----------------------------------------------------
+      - name: Upload Trivy Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: trivy-results.sarif
 
-COPY package.json package-lock.json ./
-RUN npm ci
+      # ----------------------------------------------------
+      # Simulated ECR Login (no AWS required)
+      # ----------------------------------------------------
+      - name: Simulate ECR Login
+        run: echo "ECR login simulated using GitHub Secrets"
 
-COPY src/ ./src/
-RUN mkdir -p dist && cp -r src/* dist/
-
-
-
-# STAGE 3: runtime
-
-FROM node:20-alpine AS runner
-
-WORKDIR /app
-
-# security updates
-RUN apk update && apk upgrade --no-cache
-
-# non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-
-USER appuser
-
-ENV NODE_ENV=production
-
-# IMPORTANT FIX BELOW 👇
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY package.json ./
-
-EXPOSE 3000
-
-CMD ["node", "dist/index.js"]
+      # ----------------------------------------------------
+      # Simulated Docker Push
+      # ----------------------------------------------------
+      - name: Simulate Docker Push
+        run: echo "Image pushed to ECR (simulation)"
