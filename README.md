@@ -73,7 +73,7 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 Currently, files copied into the `runner` stage are owned by `root`. Changing ownership with a separate `RUN chown` adds a layer; the cleaner approach is:
 
 ```dockerfile
-COPY --from=builder --chown=appuser:appgroup /app/src ./src 
+COPY --from=builder --chown=appuser:appgroup /app/dist ./dist
 COPY --chown=appuser:appgroup package*.json ./
 ```
 
