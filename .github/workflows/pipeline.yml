@@ -14,34 +14,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # BUILD IMAGE
       - name: Build Docker image
         run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
-      # INSTALL TRIVY
+      # FIXED TRIVY INSTALL
       - name: Install Trivy
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget
-          wget https://github.com/aquasecurity/trivy/releases/download/v0.55.0/trivy_0.55.0_Linux-64bit.tar.gz
-          tar zxvf trivy_0.55.0_Linux-64bit.tar.gz
-          sudo mv trivy /usr/local/bin/
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
           trivy --version
 
       # SECURITY GATE
-      - name: Security Scan (CRITICAL FAIL)
+      - name: Run Trivy scan (CRITICAL gate)
         run: |
           trivy image \
             --severity CRITICAL \
             --ignore-unfixed \
             --exit-code 1 \
+            --no-progress \
             $IMAGE_NAME:$IMAGE_TAG
 
       # REPORT
-      - name: Generate SARIF Report
+      - name: Generate SARIF report
         if: always()
         run: |
           trivy image \
@@ -52,16 +48,15 @@ jobs:
             --output trivy-results.sarif \
             $IMAGE_NAME:$IMAGE_TAG
 
-      - name: Upload Report
+      - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
           path: trivy-results.sarif
 
-      # SIMULATE ECR
       - name: Simulate ECR Login
         run: echo "ECR login simulated"
 
-      - name: Simulate Push
+      - name: Simulate Docker Push
         run: echo "Image pushed to ECR (simulation)"
