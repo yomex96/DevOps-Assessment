@@ -19,11 +19,22 @@ variable "availability_zones" {
 }
 
 variable "public_subnet_cidrs" {
-  description = "CIDR blocks for public subnets (one per AZ). Used for load balancers."
+  description = "CIDR blocks for public subnets (one per AZ). Used for load balancers and NAT Gateways."
   type        = list(string)
 }
 
 variable "private_subnet_cidrs" {
   description = "CIDR blocks for private subnets (one per AZ). Used for application servers."
   type        = list(string)
+}
+
+variable "flow_log_cloudwatch_iam_role_arn" {
+  description = "ARN of the IAM Role that allows VPC Flow Logs to write to CloudWatch Logs."
+  type        = string
+}
+
+variable "aws_region" {
+  description = "AWS region — needed to construct the S3 VPC endpoint service name."
+  type        = string
+  default     = "us-east-1"
 }

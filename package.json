@@ -1,12 +1,16 @@
 {
   "name": "epermit-api",
   "version": "1.0.0",
+  "description": "Zero-Trust E-Permit microservice — Qualisys Consulting DevOps Assessment",
   "main": "dist/index.js",
   "scripts": {
-    "build": "mkdir -p dist && cp src/index.js dist/index.js"
+    "build": "mkdir -p dist && cp src/index.js dist/index.js",
+    "start": "node dist/index.js",
+    "dev": "node src/index.js"
   },
-  "description": "> **Qualisys Consulting DevOps Assessment** — Production-grade IaC, containerisation, and CI/CD for a government E-Permit microservice.",
-  "keywords": [],
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "author": "",
   "license": "ISC"
 }

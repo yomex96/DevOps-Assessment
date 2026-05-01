@@ -1,7 +1,8 @@
 # =============================================================================
 # terraform.tfvars.example
 # Copy this file to terraform.tfvars and fill in your values.
-# NEVER commit terraform.tfvars to version control — add it to .gitignore.
+# NEVER commit terraform.tfvars to version control — it is in .gitignore.
+# Pass sensitive values via TF_VAR_* environment variables in CI instead.
 # =============================================================================
 
 aws_region   = "us-east-1"
@@ -15,3 +16,7 @@ public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24"]
 private_subnet_cidrs = ["10.0.11.0/24", "10.0.12.0/24"]
 
 s3_secure_documents_bucket = "epermit-secure-documents-prod"
+
+# DR failover example — uncomment and set these when redeploying to eu-west-1:
+# aws_region             = "eu-west-1"
+# availability_zones     = ["eu-west-1a", "eu-west-1b"]

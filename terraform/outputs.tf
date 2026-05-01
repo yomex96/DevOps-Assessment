@@ -1,5 +1,7 @@
 # =============================================================================
 # ROOT OUTPUTS.TF
+# Expose key identifiers needed by downstream consumers (e.g. application
+# Terraform modules that reference this infrastructure layer).
 # =============================================================================
 
 output "vpc_id" {
@@ -8,7 +10,7 @@ output "vpc_id" {
 }
 
 output "public_subnet_ids" {
-  description = "IDs of the public subnets (for load balancers)."
+  description = "IDs of the public subnets (for Application Load Balancers)."
   value       = module.vpc.public_subnet_ids
 }
 
@@ -25,4 +27,9 @@ output "ec2_instance_profile_name" {
 output "ec2_role_arn" {
   description = "ARN of the least-privilege IAM Role for EC2 instances."
   value       = module.iam.role_arn
+}
+
+output "s3_vpc_endpoint_id" {
+  description = "ID of the S3 Gateway VPC Endpoint (private traffic to S3 never leaves the AWS network)."
+  value       = module.vpc.s3_endpoint_id
 }
