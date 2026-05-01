@@ -1,6 +1,3 @@
-# syntax=docker/dockerfile:1.7
-# Enables BuildKit: --mount=type=cache and parallel stage execution.
-
 # =============================================================================
 # STAGE 0: BASE
 # node:20-alpine is the official minimal Node.js image.
@@ -10,12 +7,6 @@
 FROM node:20-alpine AS base
 
 WORKDIR /app
-
-# Upgrade all Alpine packages to their latest patched versions immediately.
-# This eliminates known fixed CVEs in the base image before any app code runs.
-# --no-cache avoids storing the apk index in the image layer.
-RUN apk update && apk upgrade --no-cache && rm -rf /var/cache/apk/*
-
 
 # =============================================================================
 # STAGE 1: DEPS  ← runs in parallel with STAGE 2
@@ -66,12 +57,10 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 
 WORKDIR /app
 
-# Upgrade all Alpine packages to latest patched versions.
-# Critical for a government system — no known-fixed CVEs allowed in production.
-RUN apk update && apk upgrade --no-cache && rm -rf /var/cache/apk/*
 
 # Non-root user — UID/GID 1001
 # Avoids collisions with root (0) and nobody (65534).
+
 RUN addgroup --system --gid 1001 appgroup && \
     adduser  --system --uid 1001 --ingroup appgroup --no-create-home appuser
 
