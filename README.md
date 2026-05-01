@@ -438,6 +438,8 @@ Choose one path:
 | **`terraform plan` before `apply`** | Mandatory sanity check during DR. Never skip it — what Terraform intends to do must be reviewed by a human before resources are created. |
 | **Region passed as variable** | The AWS provider region is a variable, not hardcoded. The same Terraform code targets `eu-west-1` with a single `-var` flag — no file edits during an outage. |
 
+
+### Author : Abayomi Robert Onawole
 ---
 
 *Prepared for Qualisys Consulting DevOps Assessment v1.0 — 2026*
