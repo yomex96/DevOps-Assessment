@@ -9,7 +9,6 @@
 FROM node:20-alpine AS base
 
 WORKDIR /app
-RUN apk add --no-cache curl
 
 
 # =============================================================================
@@ -43,7 +42,6 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY src/ ./src/
 
 # Always create dist/ first, then attempt build, then copy src as fallback.
-# Three explicit steps — no silent failures.
 RUN mkdir -p dist && \
     (npm run build 2>/dev/null || true) && \
     (ls dist/ | grep -q . || cp -r src/* dist/)
@@ -52,6 +50,8 @@ RUN mkdir -p dist && \
 # =============================================================================
 # STAGE 3: RUNNER  ← starts after STAGE 1 and STAGE 2 both complete
 # Minimal production image — no build tools, no devDependencies.
+# NO curl — eliminates the largest source of CVEs in alpine images.
+# HEALTHCHECK uses Node's built-in http module instead.
 # =============================================================================
 FROM node:20-alpine AS runner
 
@@ -59,8 +59,6 @@ ENV NODE_ENV=production
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 
 WORKDIR /app
-
-RUN apk add --no-cache curl
 
 # Non-root user — UID/GID 1001
 RUN addgroup --system --gid 1001 appgroup && \
@@ -79,9 +77,10 @@ USER appuser
 
 EXPOSE 3000
 
-# Container marked unhealthy after 3 consecutive failures
+# HEALTHCHECK using Node's built-in http module — no curl needed.
+# Eliminates curl as a dependency entirely, reducing attack surface and CVEs.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD node -e "require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
 # Exec form — Node receives SIGTERM directly for graceful shutdown
 CMD ["node", "dist/index.js"]
