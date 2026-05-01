@@ -6,8 +6,7 @@ on:
       - main
 
 env:
-  ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
-  ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
+  IMAGE_NAME: epermit-api
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
@@ -16,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout code
+      # 1. Checkout source code
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -24,7 +23,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 3. Build Docker Image
+      # 3. Build Docker image (local only)
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
@@ -32,16 +31,15 @@ jobs:
           file: ./Dockerfile
           load: true
           push: false
-          tags: |
-            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # 4. Security Scan (FAIL on CRITICAL only)
+      # 4. Security scan with Trivy (FAIL on CRITICAL only)
       - name: Security Scan with Trivy (CRITICAL only)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: "${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
+          image-ref: "${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
           format: "sarif"
           output: "trivy-results.sarif"
           exit-code: "1"
@@ -57,22 +55,22 @@ jobs:
           name: trivy-report-${{ github.sha }}
           path: trivy-results.sarif
 
-      # 6. Simulated ECR Login
+      # 6. Simulated ECR login
       - name: Simulate ECR Login
         run: |
-          echo "🔐 Simulating login to Amazon ECR..."
-          echo "Registry: $ECR_REGISTRY"
-          echo "Login successful (simulated using GitHub Secrets)"
+          echo "Simulating login to Amazon ECR..."
+          echo "Login successful (simulated)"
 
-      # 7. Simulated Push
+      # 7. Simulated push to ECR
       - name: Simulate Docker Image Push
         run: |
-          echo "🚀 Simulating Docker push to ECR..."
-          echo "Image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "Simulating Docker push..."
+          echo "Image: $IMAGE_NAME:$IMAGE_TAG"
           echo "Push successful (simulation complete)"
 
-      # 8. Output image info
+      # 8. Output metadata
       - name: Image metadata
         run: |
-          echo "✅ Build completed successfully"
-          echo "Image tag: $IMAGE_TAG"
+          echo "Build completed successfully"
+          echo "Image: $IMAGE_NAME"
+          echo "Tag: $IMAGE_TAG"
