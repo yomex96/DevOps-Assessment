@@ -8,24 +8,32 @@
 
 ```
 epermit-infrastructure/
-├── Dockerfile                          # Task 1 — Hardened, multi-stage image
+├── .dockerignore
+├── .gitignore
 ├── .github/
 │   └── workflows/
 │       └── pipeline.yml                # Task 3 — CI/CD pipeline
-├── terraform/
-│   ├── main.tf                         # Root orchestrator
-│   ├── variables.tf                    # All input variables (no hardcoded values)
-│   ├── outputs.tf                      # Root outputs
-│   └── modules/
-│       ├── vpc/                        # Task 2a — HA VPC across 2 AZs
-│       │   ├── main.tf
-│       │   ├── variables.tf
-│       │   └── outputs.tf
-│       └── iam/                        # Task 2b — Least-privilege EC2 IAM Role
-│           ├── main.tf
-│           ├── variables.tf
-│           └── outputs.tf
-└── README.md
+├── Dockerfile                          # Task 1 — Hardened, multi-stage image
+├── README.md
+└── terraform/
+    ├── providers.tf                    # block, backend, provider "aws"
+    ├──  main.tf                        # Root orchestrator               
+    ├── variables.tf                    # All input variables (no hardcoded values)
+    ├── outputs.tf                      # Root outputs
+    ├── terraform.tfvars.example  
+    └── modules/
+        ├── vpc/                        # Task 2a — HA VPC across 2 AZs
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   ├── outputs.tf
+        │   └── versions.tf
+        └── iam/                        # Task 2b — Least-privilege EC2 IAM Role
+            ├── main.tf
+            ├── variables.tf
+            ├── outputs.tf
+            └── versions.tf
+
+
 ```
 
 ---

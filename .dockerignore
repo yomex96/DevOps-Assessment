@@ -1,0 +1,51 @@
+# =============================================================================
+# .dockerignore — Prevents sensitive and unnecessary files from being
+# copied into the Docker build context. This reduces image size AND
+# prevents secrets from leaking into the image layer history.
+# =============================================================================
+
+# Version control — never needed inside an image
+.git
+.gitignore
+
+# Local dependency directory — the image installs its own via npm ci
+node_modules
+
+# Environment files — NEVER bake secrets into an image
+.env
+.env.*
+*.env
+
+# Test files and coverage reports — not needed in production
+__tests__
+*.test.js
+*.spec.js
+coverage/
+.nyc_output/
+
+# Editor and OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+
+# CI/CD and infrastructure code — not part of the runtime app
+.github/
+terraform/
+*.tf
+*.tfvars
+
+# Build artifacts from local dev
+dist/
+build/
+tmp/
+
+# Documentation
+*.md
+docs/
+
+# Docker files themselves (already in build context, no need to re-copy)
+Dockerfile
+docker-compose*.yml

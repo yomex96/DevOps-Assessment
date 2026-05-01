@@ -1,0 +1,36 @@
+# =============================================================================
+# .gitignore — Prevents sensitive and generated files from being committed
+# =============================================================================
+
+# Terraform state files — NEVER commit these; they contain sensitive data
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Terraform variable files with real values — use .tfvars.example as the template
+terraform.tfvars
+*.auto.tfvars
+
+# Terraform working directories
+.terraform/
+.terraform.lock.hcl
+
+# Environment files — secrets must never be committed
+.env
+.env.*
+*.env
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor configs
+.vscode/
+.idea/
+
+# Trivy scan output
+trivy-results.sarif
