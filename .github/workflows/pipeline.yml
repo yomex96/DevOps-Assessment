@@ -10,53 +10,62 @@ env:
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
-  build-scan-push:
+
+# =========================================================
+# 1. BUILD JOB
+# =========================================================
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Build Docker image
         run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
-      # FIXED TRIVY INSTALL
+
+# =========================================================
+# 2. SECURITY SCAN JOB
+# =========================================================
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Install Trivy
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
-          trivy --version
 
-      # SECURITY GATE
-      - name: Run Trivy scan (CRITICAL gate)
+      - name: Scan image (CRITICAL gate)
         run: |
           trivy image \
             --severity CRITICAL \
-            --ignore-unfixed \
             --exit-code 1 \
             --no-progress \
             $IMAGE_NAME:$IMAGE_TAG
 
-      # REPORT
-      - name: Generate SARIF report
-        if: always()
+
+# =========================================================
+# 3. PUSH JOB (SIMULATED ECR)
+# =========================================================
+  push:
+    runs-on: ubuntu-latest
+    needs: security-scan
+
+    steps:
+      - name: Simulate ECR login
         run: |
-          trivy image \
-            --severity CRITICAL \
-            --ignore-unfixed \
-            --exit-code 0 \
-            --format sarif \
-            --output trivy-results.sarif \
-            $IMAGE_NAME:$IMAGE_TAG
+          echo "Logging into ECR using GitHub Secrets (simulated)"
+          echo "AWS_ACCESS_KEY_ID=***"
+          echo "AWS_SECRET_ACCESS_KEY=***"
 
-      - name: Upload report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-report
-          path: trivy-results.sarif
+      - name: Tag image for ECR
+        run: |
+          echo "docker tag $IMAGE_NAME:$IMAGE_TAG <aws_account_id>.dkr.ecr.region.amazonaws.com/$IMAGE_NAME:$IMAGE_TAG"
 
-      - name: Simulate ECR Login
-        run: echo "ECR login simulated"
-
-      - name: Simulate Docker Push
-        run: echo "Image pushed to ECR (simulation)"
+      - name: Simulate Docker push
+        run: echo "docker push to ECR completed (simulated)"
