@@ -27,7 +27,8 @@ COPY --from=builder /app/dist ./dist
 COPY package*.json ./
 
 # install ONLY production deps (important fix)
-RUN npm ci --omit=dev && npm cache clean --force
+
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 USER appuser
 
