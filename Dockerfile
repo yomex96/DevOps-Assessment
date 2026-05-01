@@ -1,71 +1,55 @@
-name: E-Permit CI/CD Pipeline
+# syntax=docker/dockerfile:1.7
 
-on:
-  push:
-    branches:
-      - main
+# =========================================================
+# STAGE 1: Dependencies (cached layer)
+# =========================================================
+FROM node:20-alpine AS deps
 
-env:
-  IMAGE_NAME: epermit-api
-  IMAGE_TAG: ${{ github.sha }}
+WORKDIR /app
 
-jobs:
-  build-scan-push:
-    runs-on: ubuntu-latest
+COPY package.json package-lock.json ./
 
-    steps:
-      # ----------------------------------------------------
-      # Checkout code
-      # ----------------------------------------------------
-      - name: Checkout repository
-        uses: actions/checkout@v4
+RUN npm ci --omit=dev
 
-      # ----------------------------------------------------
-      # Build Docker image
-      # ----------------------------------------------------
-      - name: Build Docker image
-        run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
-      # ----------------------------------------------------
-      # Install Trivy (stable + reliable)
-      # ----------------------------------------------------
-      - name: Install Trivy
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-          trivy --version
+# =========================================================
+# STAGE 2: Builder (optional build step)
+# =========================================================
+FROM node:20-alpine AS builder
 
-      # ----------------------------------------------------
-      # Security scan + FAIL ON CRITICAL + generate report
-      # ----------------------------------------------------
-      - name: Run Trivy scan
-        run: |
-          trivy image \
-            --severity CRITICAL \
-            --ignore-unfixed \
-            --exit-code 1 \
-            --format sarif \
-            --output trivy-results.sarif \
-            --no-progress \
-            $IMAGE_NAME:$IMAGE_TAG
+WORKDIR /app
 
-      # ----------------------------------------------------
-      # Upload report
-      # ----------------------------------------------------
-      - name: Upload Trivy report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-report
-          path: trivy-results.sarif
+COPY package.json package-lock.json ./
+RUN npm ci
 
-      # ----------------------------------------------------
-      # Simulated ECR login
-      # ----------------------------------------------------
-      - name: Simulate ECR Login
-        run: echo "Simulated ECR login using GitHub Secrets"
+COPY src/ ./src/
 
-      # ----------------------------------------------------
-      # Simulated push
-      # ----------------------------------------------------
-      - name: Simulate Docker Push
-        run: echo "Image pushed to ECR (simulation)"
+# Create dist safely (prevents your earlier /dist errors)
+RUN mkdir -p dist && cp -r src/* dist/
+
+
+# =========================================================
+# STAGE 3: Runtime (small + secure)
+# =========================================================
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+# Security patching
+RUN apk update && apk upgrade --no-cache
+
+# Non-root user (REQUIRED by brief)
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+USER appuser
+
+ENV NODE_ENV=production
+
+# Only production artifacts
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY package.json ./
+
+EXPOSE 3000
+
+CMD ["node", "dist/index.js"]
