@@ -15,8 +15,7 @@ FROM base AS deps
 
 COPY package.json package-lock.json ./
 
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
+RUN npm ci --omit=dev
 
 
 # =============================================================================
@@ -26,8 +25,7 @@ FROM base AS build
 
 COPY package.json package-lock.json ./
 
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci
+RUN npm ci
 
 COPY src/ ./src/
 
@@ -48,12 +46,12 @@ WORKDIR /app
 RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --uid 1001 --ingroup appgroup --no-create-home appuser
 
-# Copy dependencies and build output
-COPY --from=deps  /app/node_modules ./node_modules
+# Copy dependencies + build output
+COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 
-# Set ownership
+# Fix permissions
 RUN chown -R appuser:appgroup /app
 
 USER appuser
