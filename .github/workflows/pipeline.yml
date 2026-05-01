@@ -15,19 +15,19 @@ jobs:
 
     steps:
       # ----------------------------------------------------
-      # Checkout
+      # Checkout code
       # ----------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
       # ----------------------------------------------------
-      # Build Docker Image
+      # Build Docker image
       # ----------------------------------------------------
       - name: Build Docker image
         run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
       # ----------------------------------------------------
-      # Install Trivy (stable pinned version)
+      # Install Trivy (stable + reliable)
       # ----------------------------------------------------
       - name: Install Trivy
         run: |
@@ -35,29 +35,17 @@ jobs:
           trivy --version
 
       # ----------------------------------------------------
-      # Security Gate (FAILS ONLY ON CRITICAL)
+      # Security scan + FAIL ON CRITICAL + generate report
       # ----------------------------------------------------
-      - name: Run Trivy scan (security gate)
+      - name: Run Trivy scan
         run: |
           trivy image \
             --severity CRITICAL \
             --ignore-unfixed \
             --exit-code 1 \
-            --no-progress \
-            $IMAGE_NAME:$IMAGE_TAG
-
-      # ----------------------------------------------------
-      # Generate report (always runs)
-      # ----------------------------------------------------
-      - name: Generate SARIF report
-        if: always()
-        run: |
-          trivy image \
-            --severity CRITICAL \
-            --ignore-unfixed \
-            --exit-code 0 \
             --format sarif \
             --output trivy-results.sarif \
+            --no-progress \
             $IMAGE_NAME:$IMAGE_TAG
 
       # ----------------------------------------------------
@@ -71,13 +59,13 @@ jobs:
           path: trivy-results.sarif
 
       # ----------------------------------------------------
-      # Simulated ECR Login
+      # Simulated ECR login
       # ----------------------------------------------------
       - name: Simulate ECR Login
-        run: echo "ECR login simulated via GitHub Secrets"
+        run: echo "Simulated ECR login using GitHub Secrets"
 
       # ----------------------------------------------------
-      # Simulated Push
+      # Simulated push
       # ----------------------------------------------------
       - name: Simulate Docker Push
         run: echo "Image pushed to ECR (simulation)"
