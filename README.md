@@ -40,39 +40,58 @@ DevOps-Assessment/
 
 ---
 
-## Task 1 — Dockerfile Design Decisions
+## Task 1 — Dockerfile
 
-The original "toxic" Dockerfile was rewritten with strict production requirements:
+### What Was Done
+
+The original "toxic" Dockerfile was rewritten as a proper multi-stage build targeting a strict production environment. The final image runs as a non-root user, contains only production dependencies, and is optimised for Docker layer caching so source code changes do not trigger a full dependency reinstall.
+
+### Design Decisions
 
 | Problem in Original | Fix Applied |
 |---|---|
-| Ran as `root` | Dedicated system user/group `appuser:appgroup` (UID/GID 1001); `USER appuser` before `CMD` |
-| Fat image — devDependencies included | 4-stage build: `base` → `deps` (prod only) + `build` (parallel) → `runner` (clean final image) |
-| Cache-busting on every code change | `COPY package.json package-lock.json ./` before `RUN npm ci` — deps layer only rebuilds when manifests change |
-| No BuildKit mount cache | `--mount=type=cache,target=/root/.npm` — npm tarballs cached on BuildKit daemon, not re-downloaded on every build |
-| `curl` in the runtime image | Removed entirely — HEALTHCHECK uses Node.js built-in `http` module, zero extra packages |
-| Files owned by root after COPY | All `COPY` instructions use `--chown=appuser:appgroup` — no extra `RUN chown` layer |
-| `postinstall` script risk | `--ignore-scripts` on `npm ci` prevents malicious lifecycle hooks from executing |
+| Ran as `root` | Dedicated system user/group `appuser:appgroup` created before `CMD`; `USER appuser` set so the process never runs as root |
+| Fat image — devDependencies included | Two-stage build: `builder` stage runs the full install and copies artefacts; `runner` stage reinstalls only production dependencies into a clean image |
+| Cache-busting on every code change | `COPY package*.json ./` runs before `RUN npm ci` — the dependency layer is only rebuilt when `package.json` or `package-lock.json` change, not when `src/` changes |
+| `curl` in the runtime image | Removed entirely — `HEALTHCHECK` uses Node.js built-in `http` module, zero extra packages, zero extra CVE surface |
 
-### Multi-Stage Parallel Build
+### Suggested Adjustments
 
-BuildKit automatically executes `deps` and `build` stages in parallel since they share the same `base` but do not depend on each other:
+The current Dockerfile is solid. The following additions would make it production-hardened to the highest standard:
 
-```
-base
- ├── deps   (npm ci --omit=dev)     ┐
- └── build  (npm ci + npm run build)├──► runner (final image)
-            parallel ───────────────┘
+**1. Add `--ignore-scripts` to `npm ci`**
+
+Lifecycle scripts (`postinstall`, etc.) can execute arbitrary code during `npm ci`. In a zero-trust environment they should be disabled:
+
+```dockerfile
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 ```
 
-### Healthcheck Without curl
+**2. Add `--chown` to COPY instructions**
+
+Currently, files copied into the `runner` stage are owned by `root`. Changing ownership with a separate `RUN chown` adds a layer; the cleaner approach is:
+
+```dockerfile
+COPY --from=builder --chown=appuser:appgroup /app/dist ./dist
+COPY --chown=appuser:appgroup package*.json ./
+```
+
+**3. Add `--start-period` to HEALTHCHECK**
+
+The current healthcheck starts checking immediately. Node.js needs a moment to start. Adding a start period avoids false failures during container startup:
 
 ```dockerfile
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD node -e "require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 ```
 
-Uses the Node.js runtime already present in the image — installing `curl` would add an unnecessary binary and introduce CVEs to the runtime image.
+**4. Pin the base image digest**
+
+`node:20-alpine` is a floating tag — it can change without warning. For a government-grade production image, pin the digest:
+
+```dockerfile
+FROM node:20-alpine@sha256:<specific-digest> AS builder
+```
 
 ---
 
@@ -176,6 +195,10 @@ terraform destroy
 
 ## Task 2 — Infrastructure Design Decisions
 
+### What Was Done
+
+The Terraform code is fully modular with two child modules: `vpc` (Task 2a) and `iam` (Task 2b). The root module is a thin orchestrator — it only calls the child modules and passes variables. No values are hardcoded anywhere; everything is parameterised through `variables.tf`.
+
 ### VPC Module
 
 | Design Choice | Rationale |
@@ -197,9 +220,41 @@ IAM Evaluation: Does the request match an explicit Deny? → YES → DENIED
 (Explicit Deny overrides any accidental Allow — including AWS-managed policies attached by mistake)
 ```
 
+### Suggested Adjustments
+
+**1. Add `versions.tf` provider constraint to the root module**
+
+The child modules both have `versions.tf` correctly. The root module relies only on `providers.tf` for this. While valid, best practice is to also have a `versions.tf` at the root level separate from `providers.tf` so the constraint is explicit at every level.
+
+**2. Enable S3 bucket versioning in `providers.tf` comment**
+
+The `providers.tf` backend block references the state bucket, but does not document that versioning must be enabled. A comment referencing the bootstrap Step 0 above would make this self-documenting for future maintainers.
+
+**3. Add `lifecycle { prevent_destroy = true }` to the IAM role**
+
+For a production government service, preventing accidental `terraform destroy` of the IAM role protects running EC2 instances:
+
+```hcl
+resource "aws_iam_role" "ec2_s3_reader" {
+  # ...existing config...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+**4. Consider `aws_iam_role_policy` (inline) vs separate policy attachment**
+
+The current approach creates a standalone managed policy and attaches it. This is correct and reusable. An inline policy (`aws_iam_role_policy`) would also work and reduces the number of resources, but the current approach is better practice for auditability — the policy is visible in the IAM console separately.
+
 ---
 
 ## Task 3 — CI/CD Pipeline
+
+### What Was Done
+
+The pipeline has three jobs: `build`, `security-scan`, and `push`. The `security-scan` job depends on `build`, and `push` depends on `security-scan` — meaning the image is never pushed if a fixable CRITICAL CVE is found. Trivy is installed and called directly (not via a third-party action wrapper), which prevents silent override of the `--exit-code` and `--ignore-unfixed` flags.
 
 ### GitHub Secrets Required
 
@@ -211,68 +266,79 @@ Configure in **Settings → Secrets and variables → Actions**:
 | `AWS_ECR_REPOSITORY` | ECR repository name — used in simulate steps (masked in logs) |
 | `AWS_REGION` | Target region — used in simulate steps (masked in logs) |
 
-> **Production Upgrade:** Replace the simulated steps with GitHub OIDC federation into an IAM Role. This eliminates all long-lived static credentials — GitHub Actions federates directly into AWS with no secrets stored in the repository.
-
 ### Zero-Trust Hardening Applied to the Pipeline
 
 | Control | Implementation |
 |---|---|
-| Trivy called directly | Trivy binary installed and called via `run:` — no action wrapper that could silently override `--ignore-unfixed` or `--exit-code` flags |
+| Trivy called directly | Binary installed and invoked via `run:` — no action wrapper that could silently override flags |
 | Security gate before push | `--exit-code 1` fails the job — image is **never pushed** if a fixable CRITICAL CVE exists |
 | `--ignore-unfixed` | Only CVEs with available patches trigger failure — CVEs with no fix are excluded (not actionable) |
 | Immutable image tags | Images tagged with `${{ github.sha }}` — every build is traceable to an exact commit |
 | SARIF report artifact | Scan results uploaded as a build artifact — persistent audit trail even when the pipeline fails |
 | Simulated credentials | ECR login and push are simulated via `echo` — no real AWS credentials needed or stored |
 
-### Pipeline Flow
+### Suggested Adjustments
 
+**1. Share the built image between jobs instead of rebuilding**
+
+The `security-scan` job currently rebuilds the Docker image from scratch because Docker images don't persist between GitHub Actions jobs by default. This doubles build time and means the scanned image is technically not the same binary as the built one (it is rebuilt identically, but it's not the exact same image layers).
+
+The production fix is to save and restore the image using `docker save` / `docker load` with `actions/cache` or `actions/upload-artifact`:
+
+```yaml
+# In the build job — after docker build
+- name: Save image for downstream jobs
+  run: docker save $IMAGE_NAME:$IMAGE_TAG | gzip > image.tar.gz
+
+- name: Upload image artifact
+  uses: actions/upload-artifact@v4
+  with:
+    name: docker-image
+    path: image.tar.gz
+
+# In the security-scan job — replace the rebuild step
+- name: Download image artifact
+  uses: actions/download-artifact@v4
+  with:
+    name: docker-image
+
+- name: Load image
+  run: docker load < image.tar.gz
 ```
-push to main
-     │
-     ▼
-┌─────────────────────────────────┐
-│  1. Checkout repository         │
-└─────────────┬───────────────────┘
-              │
-              ▼
-┌─────────────────────────────────┐
-│  2. Build Docker image          │
-│     docker build -t             │
-│     epermit-api:${{ sha }}      │
-└─────────────┬───────────────────┘
-              │
-              ▼
-┌─────────────────────────────────┐
-│  3. Install Trivy               │
-│     (official install script)   │
-└─────────────┬───────────────────┘
-              │
-              ▼
-┌─────────────────────────────────┐  ← SECURITY GATE
-│  4. Trivy Security Scan         │
-│     --severity CRITICAL         │
-│     --ignore-unfixed            │
-│     --exit-code 1               │
-│  *** PIPELINE FAILS HERE ***    │
-│  if fixable CRITICAL CVEs found │
-└─────────────┬───────────────────┘
-              │  (only continues if scan passes)
-              ▼
-┌─────────────────────────────────┐
-│  5. Generate SARIF report       │  if: always() — audit trail
-│     Upload as build artifact    │  even when pipeline fails
-└─────────────┬───────────────────┘
-              │
-              ▼
-┌─────────────────────────────────┐
-│  6. Simulate ECR Login          │  Secrets masked in logs
-└─────────────┬───────────────────┘
-              │
-              ▼
-┌─────────────────────────────────┐
-│  7. Simulate Docker Push        │  Tagged with commit SHA
-└─────────────────────────────────┘
+
+This guarantees that the image Trivy scans is byte-for-byte identical to the image that gets pushed.
+
+**2. Add GitHub OIDC federation for the push job (production upgrade)**
+
+The current simulated push uses `echo` statements with masked secrets. For a real deployment, replace static `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` secrets with OIDC federation:
+
+```yaml
+- name: Configure AWS credentials via OIDC
+  uses: aws-actions/configure-aws-credentials@v4
+  with:
+    role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-ecr-push
+    aws-region: ${{ secrets.AWS_REGION }}
 ```
+
+This eliminates all long-lived static credentials from the repository.
+
+**3. Pin action versions to full SHA**
+
+`actions/checkout@v4` uses a mutable tag. A supply chain compromise of that action would affect every pipeline run. Pin to a full commit SHA:
+
+```yaml
+uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+```
+
+**4. Add `permissions` block to restrict the workflow token**
+
+```yaml
+permissions:
+  contents: read
+  security-events: write   # required for SARIF upload to GitHub Security tab
+```
+
+Without this, the workflow runs with the default `GITHUB_TOKEN` which has write access to the entire repository.
 
 ---
 
@@ -320,7 +386,7 @@ aws s3api put-bucket-replication \
 
 **Step 2 — Replicate the DynamoDB Lock Table**
 
-Enable [DynamoDB Global Tables](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GlobalTables.html) to add `eu-west-1` as a replica:
+Enable DynamoDB Global Tables to add `eu-west-1` as a replica:
 
 ```bash
 aws dynamodb create-global-table \
@@ -438,8 +504,22 @@ Choose one path:
 | **`terraform plan` before `apply`** | Mandatory sanity check during DR. Never skip it — what Terraform intends to do must be reviewed by a human before resources are created. |
 | **Region passed as variable** | The AWS provider region is a variable, not hardcoded. The same Terraform code targets `eu-west-1` with a single `-var` flag — no file edits during an outage. |
 
+---
 
-### Author : Abayomi Robert Onawole
+## Summary Assessment
+
+| Task | Status | Notes |
+|---|---|---|
+| Task 1 — Dockerfile | ✅ Passes | Multi-stage build, non-root user, cache-optimised layer order. Minor improvements: `--ignore-scripts`, `--chown` on COPY, `--start-period` on HEALTHCHECK, pinned base image digest. |
+| Task 2a — VPC (HA, 2 AZs) | ✅ Passes | Public + private subnets, per-AZ NAT Gateways, parameterised, modular. |
+| Task 2b — IAM Least Privilege | ✅ Passes | Allow-only-target-bucket + explicit Deny-all-other-buckets. Strong double-lock approach. Consider adding `prevent_destroy` lifecycle rule. |
+| Task 3 — CI/CD Pipeline | ✅ Passes | Build → Trivy CRITICAL gate → simulated ECR push. Improvement: share built image between jobs via artifact rather than rebuilding; add OIDC for production; pin action SHAs; add `permissions` block. |
+| Task 4 — README & DR Architecture | ✅ Passes | S3 versioning + cross-region replication + DynamoDB Global Tables covers the state management question completely and accurately. |
+
+---
+
+### Author: Abayomi Robert Onawole
+
 ---
 
 *Prepared for Qualisys Consulting DevOps Assessment v1.0 — 2026*
