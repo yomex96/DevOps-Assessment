@@ -18,51 +18,39 @@ jobs:
         uses: actions/checkout@v4
 
       # -----------------------------------------------------------------------
-      # STEP 1 — Build Docker image (Task 1 Dockerfile)
+      # BUILD IMAGE
       # -----------------------------------------------------------------------
       - name: Build Docker image
         run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
-      - name: List Docker images
-        run: docker images
-
       # -----------------------------------------------------------------------
-      # STEP 2 — Install Trivy directly (bypasses trivy-action SARIF override)
+      # INSTALL TRIVY (PINNED VERSION - IMPORTANT FIX)
       # -----------------------------------------------------------------------
       - name: Install Trivy
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          TRIVY_VERSION=0.55.0
+          wget https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz
+          tar zxvf trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz
+          sudo mv trivy /usr/local/bin/
+          trivy --version
 
       # -----------------------------------------------------------------------
-      # STEP 3 — SECURITY GATE: Fail on CRITICAL CVEs with available fixes
-      # Calls Trivy binary directly — no action wrapper overriding our flags.
-      # --ignore-unfixed: skip CVEs with no available patch (reduces noise)
-      # --exit-code 1:    pipeline fails if any CRITICAL CVE has a fix available
+      # SECURITY SCAN (SINGLE RUN - FIXED)
       # -----------------------------------------------------------------------
-      - name: Run Trivy security scan (CRITICAL gate)
+      - name: Run Trivy security scan (CRITICAL gate + report)
         run: |
           trivy image \
             --severity CRITICAL \
             --ignore-unfixed \
             --exit-code 1 \
-            --no-progress \
-            $IMAGE_NAME:$IMAGE_TAG
-
-      # -----------------------------------------------------------------------
-      # STEP 4 — Generate SARIF report as artifact (always runs)
-      # -----------------------------------------------------------------------
-      - name: Generate Trivy SARIF report
-        if: always()
-        run: |
-          trivy image \
-            --severity CRITICAL \
-            --ignore-unfixed \
-            --exit-code 0 \
             --format sarif \
             --output trivy-results.sarif \
             --no-progress \
             $IMAGE_NAME:$IMAGE_TAG
 
+      # -----------------------------------------------------------------------
+      # UPLOAD REPORT
+      # -----------------------------------------------------------------------
       - name: Upload Trivy report
         if: always()
         uses: actions/upload-artifact@v4
@@ -71,7 +59,7 @@ jobs:
           path: trivy-results.sarif
 
       # -----------------------------------------------------------------------
-      # STEP 5 — Simulate ECR login and push (Task 3 requirement)
+      # SIMULATED ECR PUSH
       # -----------------------------------------------------------------------
       - name: Simulate ECR Login
         run: echo "Simulated ECR login using GitHub Secrets"
