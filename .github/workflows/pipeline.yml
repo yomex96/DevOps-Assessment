@@ -1,122 +1,78 @@
 name: E-Permit CI/CD Pipeline
 
-# Trigger on every push to the main branch
 on:
   push:
     branches:
       - main
 
 env:
-  # ECR registry and repo name — values come from GitHub Secrets (masked in logs)
-  ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}        # e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com
-  ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}    # e.g. epermit-api
-  IMAGE_TAG: ${{ github.sha }}                          # Use commit SHA for immutable image tags
+  ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+  ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
-  # ===========================================================================
-  # JOB 1: BUILD, SCAN & PUSH
-  # Builds the Docker image, security-scans it, fails on CRITICAL CVEs,
-  # then pushes to ECR only if the image is clean.
-  # ===========================================================================
   build-scan-push:
-    name: Build → Security Scan → Push to ECR
+    name: Build → Security Scan → Simulated Push
     runs-on: ubuntu-latest
 
     steps:
-      # -----------------------------------------------------------------------
-      # 1. Check out source code
-      # -----------------------------------------------------------------------
+      # 1. Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # -----------------------------------------------------------------------
-      # 2. Set up Docker Buildx (enables BuildKit cache, multi-platform, etc.)
-      # -----------------------------------------------------------------------
+      # 2. Setup Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # -----------------------------------------------------------------------
-      # 3. Build the Docker image (from Task 1 Dockerfile)
-      #    We tag it locally first; only push after it passes the security scan.
-      # -----------------------------------------------------------------------
+      # 3. Build Docker Image
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          # load=true puts the image into the local Docker daemon for scanning.
-          # push=false — we do NOT push yet; the image must pass the scan first.
           load: true
           push: false
           tags: |
             ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
-          # Use GitHub Actions cache to speed up layer rebuilds
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # -----------------------------------------------------------------------
-      # 4. SECURITY SCAN — Trivy (shift-left security)
-      #    Scans the locally built image for OS and library vulnerabilities.
-      #    exit-code: 1 → the pipeline FAILS if any CRITICAL CVE is found.
-      #    This gate prevents vulnerable images from ever reaching ECR.
-      # -----------------------------------------------------------------------
-      - name: Security Scan with Trivy (CRITICAL gate)
+      # 4. Security Scan (FAIL on CRITICAL only)
+      - name: Security Scan with Trivy (CRITICAL only)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: "${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
-          format: "table"
-          exit-code: "1"                   # ← FAIL the pipeline on findings
-          ignore-unfixed: true             # Ignore CVEs with no fix yet (reduces noise)
+          format: "sarif"
+          output: "trivy-results.sarif"
+          exit-code: "1"
+          ignore-unfixed: true
           vuln-type: "os,library"
-          severity: "CRITICAL"             # ← Only block on CRITICAL severity
+          severity: "CRITICAL"
 
-      # -----------------------------------------------------------------------
-      # 5. Upload Trivy results as a build artifact (visible in Actions UI)
-      #    Runs even if the scan step fails so the report is always accessible.
-      # -----------------------------------------------------------------------
-      - name: Upload Trivy scan report
-        uses: actions/upload-artifact@v4
+      # 5. Upload scan report (always runs)
+      - name: Upload Trivy report
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: trivy-scan-report-${{ github.sha }}
+          name: trivy-report-${{ github.sha }}
           path: trivy-results.sarif
-          retention-days: 30
 
-      # -----------------------------------------------------------------------
-      # 6. Authenticate to Amazon ECR
-      #    Uses masked GitHub Secrets — fake credentials never appear in logs.
-      #    In a real deployment, replace with an OIDC-federated role assumption
-      #    (no long-lived keys needed at all).
-      # -----------------------------------------------------------------------
-      - name: Authenticate to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-
-      # -----------------------------------------------------------------------
-      # 7. Push the clean, scanned image to ECR
-      #    This step is only reached if Trivy found zero CRITICAL CVEs.
-      # -----------------------------------------------------------------------
-      - name: Push image to Amazon ECR
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: |
-            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # -----------------------------------------------------------------------
-      # 8. Print image digest for traceability
-      # -----------------------------------------------------------------------
-      - name: Image digest
+      # 6. Simulated ECR Login
+      - name: Simulate ECR Login
         run: |
-          echo "✅ Image pushed successfully."
-          echo "Registry : ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}"
-          echo "Tag      : ${{ env.IMAGE_TAG }}"
+          echo "🔐 Simulating login to Amazon ECR..."
+          echo "Registry: $ECR_REGISTRY"
+          echo "Login successful (simulated using GitHub Secrets)"
+
+      # 7. Simulated Push
+      - name: Simulate Docker Image Push
+        run: |
+          echo "🚀 Simulating Docker push to ECR..."
+          echo "Image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "Push successful (simulation complete)"
+
+      # 8. Output image info
+      - name: Image metadata
+        run: |
+          echo "✅ Build completed successfully"
+          echo "Image tag: $IMAGE_TAG"
