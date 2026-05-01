@@ -1,10 +1,9 @@
-# Dependencies (always installed in container)
+# Dependencies
 node_modules
 
-# Environment secrets
+# Environment variables
 .env
 .env.*
-*.env
 
 # Logs
 npm-debug.log*
@@ -19,15 +18,10 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Coverage / test artifacts
+# Coverage / tests
 coverage/
 .nyc_output/
 
-# Build output (optional, safe because Docker builds it)
+# Build artifacts
 dist/
 build/
-
-# Git metadata (never needed in image)
-.git
-.gitignore
-
