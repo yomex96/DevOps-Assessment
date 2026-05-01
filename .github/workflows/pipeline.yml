@@ -15,15 +15,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout
+      # 1. Checkout source code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Buildx
+      # 2. Setup Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Build image (IMPORTANT: load into Docker daemon)
+      # 3. Build Docker image (loaded locally for scanning)
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
@@ -33,37 +33,45 @@ jobs:
           push: false
           tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-      # Security scan (STRICT GATE)
-      - name: Trivy Security Scan
+      # 4. Run Trivy security scan (STRICT GATE)
+      - name: Run Trivy vulnerability scan
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          format: "table"
+          format: "sarif"
+          output: "trivy-results.sarif"
           exit-code: "1"
+          severity: "CRITICAL"
           ignore-unfixed: true
           vuln-type: "os,library"
-          severity: "CRITICAL"
 
-      # Upload report (only if scan runs)
+      # 5. Upload scan report (always run for audit trail)
       - name: Upload Trivy report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-report-${{ github.sha }}
+          name: trivy-scan-report-${{ github.sha }}
           path: trivy-results.sarif
 
-      # Simulated ECR login
+      # 6. Simulated ECR login (no real AWS used)
       - name: Simulate ECR Login
-        run: echo "Simulating ECR login..."
-
-      # Simulated push
-      - name: Simulated Docker Push
         run: |
-          echo "Image: $IMAGE_NAME:$IMAGE_TAG"
-          echo "Push successful (simulated)"
+          echo "Logging into Amazon ECR (simulated)..."
+          echo "Using GitHub Secrets for credentials (mocked)"
 
-      # Metadata
-      - name: Output metadata
+      # 7. Simulated push to ECR
+      - name: Simulated Docker Push to ECR
         run: |
-          echo "Build completed"
+          echo "Pushing image to ECR (simulated)..."
           echo "Image: $IMAGE_NAME:$IMAGE_TAG"
+          echo "Push successful (simulation only)"
+
+      # 8. Pipeline summary
+      - name: Pipeline Summary
+        run: |
+          echo "====================================="
+          echo "E-PERMIT PIPELINE COMPLETED"
+          echo "Image: $IMAGE_NAME:$IMAGE_TAG"
+          echo "Security scan: PASSED (no CRITICAL vulns)"
+          echo "Push: SIMULATED"
+          echo "====================================="
