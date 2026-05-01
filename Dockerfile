@@ -1,52 +1,41 @@
 # syntax=docker/dockerfile:1.7
 
 # =========================================================
-# STAGE 1: Dependencies (cached layer)
-# =========================================================
-FROM node:20-alpine AS deps
-
-WORKDIR /app
-
-COPY package.json package-lock.json ./
-
-RUN npm ci --omit=dev
-
-
-# =========================================================
-# STAGE 2: Builder (optional build step)
+# STAGE 1: build (single source of truth)
 # =========================================================
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+
+# install ALL deps needed for build
 RUN npm ci
 
 COPY src/ ./src/
 
-# Create dist safely (prevents your earlier /dist errors)
+# build-safe output folder
 RUN mkdir -p dist && cp -r src/* dist/
 
 
 # =========================================================
-# STAGE 3: Runtime (small + secure)
+# STAGE 2: production runtime (clean + secure)
 # =========================================================
 FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Security patching
+# security patching
 RUN apk update && apk upgrade --no-cache
 
-# Non-root user (REQUIRED by brief)
+# non-root user (REQUIRED)
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 USER appuser
 
 ENV NODE_ENV=production
 
-# Only production artifacts
-COPY --from=deps /app/node_modules ./node_modules
+# ONLY COPY FINAL BUILD OUTPUT
 COPY --from=builder /app/dist ./dist
 COPY package.json ./
 
