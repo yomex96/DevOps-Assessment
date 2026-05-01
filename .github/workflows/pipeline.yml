@@ -15,15 +15,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout source code
+      # Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Setup Docker Buildx
+      # Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 3. Build Docker image (local only)
+      # Build image (IMPORTANT: load into Docker daemon)
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
@@ -32,22 +32,19 @@ jobs:
           load: true
           push: false
           tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
-      # 4. Security scan with Trivy (FAIL on CRITICAL only)
-      - name: Security Scan with Trivy (CRITICAL only)
+      # Security scan (STRICT GATE)
+      - name: Trivy Security Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: "${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
-          format: "sarif"
-          output: "trivy-results.sarif"
+          image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: "table"
           exit-code: "1"
           ignore-unfixed: true
           vuln-type: "os,library"
           severity: "CRITICAL"
 
-      # 5. Upload scan report (always runs)
+      # Upload report (only if scan runs)
       - name: Upload Trivy report
         if: always()
         uses: actions/upload-artifact@v4
@@ -55,22 +52,18 @@ jobs:
           name: trivy-report-${{ github.sha }}
           path: trivy-results.sarif
 
-      # 6. Simulated ECR login
+      # Simulated ECR login
       - name: Simulate ECR Login
-        run: |
-          echo "Simulating login to Amazon ECR..."
-          echo "Login successful (simulated)"
+        run: echo "Simulating ECR login..."
 
-      # 7. Simulated push to ECR
-      - name: Simulate Docker Image Push
+      # Simulated push
+      - name: Simulated Docker Push
         run: |
-          echo "Simulating Docker push..."
           echo "Image: $IMAGE_NAME:$IMAGE_TAG"
-          echo "Push successful (simulation complete)"
+          echo "Push successful (simulated)"
 
-      # 8. Output metadata
-      - name: Image metadata
+      # Metadata
+      - name: Output metadata
         run: |
-          echo "Build completed successfully"
-          echo "Image: $IMAGE_NAME"
-          echo "Tag: $IMAGE_TAG"
+          echo "Build completed"
+          echo "Image: $IMAGE_NAME:$IMAGE_TAG"
