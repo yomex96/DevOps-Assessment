@@ -25,8 +25,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        # Pinned to full SHA — prevents supply-chain attacks via mutable tags
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Build Docker image
         run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
@@ -35,7 +34,7 @@ jobs:
         run: docker save $IMAGE_NAME:$IMAGE_TAG -o image.tar
 
       - name: Upload image artifact
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4
+        uses: actions/upload-artifact@v4
         with:
           name: docker-image
           path: image.tar
@@ -54,10 +53,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Download image artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444306234eeee8d76f21cbf8  # v4
+        uses: actions/download-artifact@v4
         with:
           name: docker-image
 
@@ -94,13 +93,13 @@ jobs:
       # Upload to GitHub Security tab (requires security-events: write permission above)
       - name: Upload SARIF to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v3
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
 
       - name: Upload SARIF artifact (additional backup)
         if: always()
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4
+        uses: actions/upload-artifact@v4
         with:
           name: trivy-report
           path: trivy-results.sarif
@@ -118,10 +117,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Download image artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444306234eeee8d76f21cbf8  # v4
+        uses: actions/download-artifact@v4
         with:
           name: docker-image
 
