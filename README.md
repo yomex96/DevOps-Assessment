@@ -261,7 +261,7 @@ push → main
 | `docker-image` | 45.9 MB | Compressed image.tar shared between jobs — same binary scanned and pushed |
 | `trivy-report` | 565 Bytes | SARIF security scan results uploaded to GitHub Security tab |
 
-![Pipeline Artifacts](images/Screenshot 2026-05-02 at 06.21.29.png)
+![Alt text](images/artifact.png)
 
 ### Zero-Trust Controls Applied
 
