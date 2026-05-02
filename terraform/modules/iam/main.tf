@@ -49,6 +49,13 @@ resource "aws_iam_role" "ec2_s3_reader" {
   tags = {
     Name = "${var.project_name}-${var.environment}-ec2-s3-reader-role"
   }
+
+  # Prevent accidental destruction of a role attached to running EC2 instances.
+  # For a government production service, terraform destroy must be an explicit
+  # decision — not an accidental consequence of a mis-scoped plan.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_iam_policy" "s3_read_only" {
