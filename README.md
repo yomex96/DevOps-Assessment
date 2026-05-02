@@ -255,6 +255,14 @@ push → main
 ```
 ![Alt text](images/cicd.png)
 
+### Pipeline Artifacts 
+| Artifact | Size | Description |
+|---|---|---|
+| `docker-image` | 45.9 MB | Compressed image.tar shared between jobs — same binary scanned and pushed |
+| `trivy-report` | 565 Bytes | SARIF security scan results uploaded to GitHub Security tab |
+
+![Pipeline Artifacts](images/Screenshot 2026-05-02 at 06.21.29.png)
+
 ### Zero-Trust Controls Applied
 
 | Control | Implementation |
