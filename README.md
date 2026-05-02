@@ -73,7 +73,7 @@ Layer 5: COPY dist/ ./dist/           ‚Üê changes on every code edit (correct ‚Ä
 
 Code changes only ever rebuild from Layer 5. A full `npm ci` is never triggered by a source edit.
 
-![Alt text](image/docker_size.png)
+![Alt text](images/docker_size.png)
 
 ---
 
