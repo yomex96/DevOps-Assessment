@@ -251,6 +251,7 @@ push → main
   ├── Simulate ECR login (AWS secrets masked via env: injection)
   └── Simulate docker tag + docker push (echo, no real credentials needed)
 ```
+![Alt text](images/cicd.png)
 
 ### Zero-Trust Controls Applied
 
