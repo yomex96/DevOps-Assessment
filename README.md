@@ -73,6 +73,8 @@ Layer 5: COPY dist/ ./dist/           ← changes on every code edit (correct �
 
 Code changes only ever rebuild from Layer 5. A full `npm ci` is never triggered by a source edit.
 
+![Alt text](image/docker_size.png)
+
 ---
 
 ## Task 2 — Terraform Infrastructure as Code
